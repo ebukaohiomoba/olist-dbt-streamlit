@@ -2,7 +2,7 @@
 
 End-to-end analytics pipeline on the Olist Brazilian e-commerce dataset (2016-2018, ~100K orders): raw CSVs → Postgres → dbt models → Streamlit dashboard.
 
-**Live dashboard:** _(link will go here once deployed to Streamlit Community Cloud)_
+**Live dashboard:** **https://olist-analytics-reporting.streamlit.app**
 
 ## Stack
 
