@@ -1,0 +1,186 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: "Customer dimension. One row per customer_id (per-order customer record)."
+    columns:
+      - name: customer_id
+        description: "Per-order customer key from the source"
+        tests:
+          - not_null
+          - unique
+      - name: customer_unique_id
+        description: "Stable identity across orders"
+        tests:
+          - not_null
+      - name: customer_zip_code_prefix
+      - name: customer_city
+      - name: customer_state
+
+  - name: dim_products
+    description: "Product dimension with derived volume and cleaned category names from the translation seed."
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - unique
+      - name: product_category_raw
+        description: "Original raw category value (mixed case / Portuguese / blank)"
+      - name: product_category
+        description: "Cleaned, display-ready category name from seed_product_category_clean"
+        tests:
+          - not_null
+      - name: category_group
+        description: "High-level grouping for dashboards (Fashion, Home, Tech, etc.)"
+        tests:
+          - not_null
+      - name: product_volume_cm3
+        description: "length * height * width"
+
+  - name: dim_customers_unique
+    description: "Grain: one row per customer_unique_id (the stable customer identity, NOT the per-order customer_id). Use this for any CLV / retention / repeat-customer analysis."
+    columns:
+      - name: customer_unique_id
+        tests:
+          - not_null
+          - unique
+      - name: total_orders
+        tests:
+          - not_null
+      - name: lifetime_payment_total
+      - name: first_order_ts
+      - name: last_order_ts
+      - name: days_active
+        description: "Days between first and last order"
+      - name: latest_customer_state
+        description: "Customer state from their most recent order"
+
+  - name: dim_sellers
+    description: "Seller dimension."
+    columns:
+      - name: seller_id
+        tests:
+          - not_null
+          - unique
+      - name: seller_state
+
+  - name: fct_order_items
+    description: "Grain: one row per (order_id, order_item_id). Use for revenue / product / seller analysis."
+    columns:
+      - name: order_item_key
+        description: "Surrogate key: order_id || '-' || order_item_id"
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+      - name: customer_id
+      - name: product_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: product_id
+      - name: seller_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_sellers')
+                field: seller_id
+      - name: price
+        tests:
+          - not_null
+      - name: freight_value
+      - name: item_total
+        description: "price + freight_value"
+
+  - name: fct_orders
+    description: "Grain: one row per order_id. Header table with item, payment, and review rollups plus delivery deltas."
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: order_status
+        tests:
+          - not_null
+      - name: item_count
+        description: "Number of order_items rows for this order"
+      - name: items_subtotal
+        description: "Sum of item prices (excludes freight)"
+      - name: freight_total
+      - name: payment_total
+        description: "Sum of payment_value across all payments for this order"
+      - name: avg_review_score
+        description: "Average review score 1-5; null if no review"
+      - name: delivered_on_time
+        description: "True if delivered on or before order_estimated_delivery_ts; null if not yet delivered"
+
+  - name: fct_payments
+    description: "Grain: one row per (order_id, payment_sequential). Use for payment method / installment analysis."
+    columns:
+      - name: payment_key
+        description: "Surrogate key: order_id || '-' || payment_sequential"
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+      - name: payment_sequential
+        tests:
+          - not_null
+      - name: payment_type
+        tests:
+          - not_null
+      - name: payment_value
+        tests:
+          - not_null
+
+  - name: fct_reviews
+    description: "Grain: one row per (review_id, order_id). Includes sentiment bucket and timing deltas."
+    columns:
+      - name: review_key
+        description: "Surrogate key: review_id || '-' || order_id"
+        tests:
+          - not_null
+          - unique
+      - name: review_id
+        tests:
+          - not_null
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+      - name: review_score
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+      - name: review_sentiment
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['positive', 'neutral', 'negative']
+      - name: hours_to_response
+        description: "Hours between review creation and seller answer; null if not yet answered"

@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: target
+    description: "Raw Target/E-Commerce data loaded into postgress"
+    database: target_ecommerce_raw
+    schema: raw
+
+    tables:
+      - name: customers
+        description: "Raw customers table"
+      - name: orders
+        description: "Raw orders table"
+      - name: order_items
+        description: "Raw order line items table"
+      - name: payments
+        description: "Raw order payments table"
+      - name: order_reviews
+        description: "Raw customer reviews table"
+      - name: products
+        description: "Raw product catalog"
+      - name: sellers
+        description: "Raw sellers table"
+      - name: geolocation
+        description: "Raw zipcode geolocation reference"
+

@@ -1,0 +1,18 @@
+version: 2
+
+seeds:
+  - name: seed_product_category_clean
+    description: "Maps the noisy/inconsistent product_category strings in raw data to a clean display name and a high-level category_group for dashboards."
+    columns:
+      - name: product_category_raw
+        description: "Raw value from products.product_category (may be mixed case, Portuguese, or blank)"
+        tests:
+          - unique
+      - name: category_clean
+        description: "Cleaned, title-cased English category name for display"
+        tests:
+          - not_null
+      - name: category_group
+        description: "High-level rollup: Fashion, Home, Tech, Health & Beauty, Construction & Tools, Sports & Leisure, Media & Entertainment, Food & Drink, Auto, Other, Unknown"
+        tests:
+          - not_null
