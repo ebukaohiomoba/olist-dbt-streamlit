@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from utils.db import query
+from utils.db import load_table
 
 st.set_page_config(
     page_title="Olist Executive Overview",
@@ -16,77 +16,64 @@ st.title("Olist Executive Overview")
 st.caption("2016–2018 Brazilian e-commerce — orders, revenue, delivery, geography")
 
 
-# ---------- data loaders ----------
+# ---------- data loaders (pandas-side aggregation so they work in both Postgres and parquet modes) ----------
 
 @st.cache_data(ttl=600, show_spinner="Loading order metrics...")
 def load_kpis() -> dict:
-    df = query(
-        """
-        select
-            count(*)                                                           as total_orders,
-            count(distinct customer_id)                                        as total_customers,
-            sum(payment_total)                                                 as total_revenue,
-            avg(payment_total)                                                 as avg_order_value,
-            avg(case when delivered_on_time then 1.0 else 0.0 end)             as on_time_rate,
-            avg(days_to_delivery)                                              as avg_days_to_delivery,
-            avg(avg_review_score)                                              as avg_review_score
-        from fct_orders
-        where order_status = 'delivered'
-        """
-    )
-    return df.iloc[0].to_dict()
+    orders = load_table("fct_orders")
+    delivered = orders[orders["order_status"] == "delivered"]
+    return {
+        "total_orders":          len(delivered),
+        "total_customers":       delivered["customer_id"].nunique(),
+        "total_revenue":         delivered["payment_total"].sum(),
+        "avg_order_value":       delivered["payment_total"].mean(),
+        "on_time_rate":          delivered["delivered_on_time"].astype(float).mean(),
+        "avg_days_to_delivery":  delivered["days_to_delivery"].mean(),
+        "avg_review_score":      delivered["avg_review_score"].mean(),
+    }
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_monthly_revenue() -> pd.DataFrame:
-    return query(
-        """
-        select
-            date_trunc('month', order_purchase_ts)::date as month,
-            count(*)            as orders,
-            sum(payment_total)  as revenue
-        from fct_orders
-        where order_purchase_ts is not null
-          and order_status <> 'canceled'
-        group by 1
-        order by 1
-        """
+    orders = load_table("fct_orders")
+    df = orders[
+        orders["order_purchase_ts"].notna() & (orders["order_status"] != "canceled")
+    ].copy()
+    df["month"] = pd.to_datetime(df["order_purchase_ts"]).dt.to_period("M").dt.to_timestamp()
+    monthly = (
+        df.groupby("month", as_index=False)
+          .agg(orders=("order_id", "count"), revenue=("payment_total", "sum"))
+          .sort_values("month")
     )
+    return monthly
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_top_categories(limit: int = 10) -> pd.DataFrame:
-    return query(
-        f"""
-        select
-            p.product_category,
-            p.category_group,
-            count(distinct oi.order_id) as orders,
-            sum(oi.item_total)          as revenue
-        from fct_order_items oi
-        join dim_products p on oi.product_id = p.product_id
-        group by 1, 2
-        order by revenue desc
-        limit {limit}
-        """
+    items = load_table("fct_order_items")
+    products = load_table("dim_products")[["product_id", "product_category", "category_group"]]
+    joined = items.merge(products, on="product_id", how="left")
+    grouped = (
+        joined.groupby(["product_category", "category_group"], as_index=False)
+              .agg(orders=("order_id", "nunique"), revenue=("item_total", "sum"))
+              .sort_values("revenue", ascending=False)
+              .head(limit)
     )
+    return grouped
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_state_orders() -> pd.DataFrame:
-    return query(
-        """
-        select
-            c.customer_state,
-            count(distinct o.order_id) as orders,
-            sum(o.payment_total)       as revenue
-        from fct_orders o
-        join dim_customers c on o.customer_id = c.customer_id
-        where c.customer_state is not null
-        group by 1
-        order by orders desc
-        """
+    orders = load_table("fct_orders")
+    customers = load_table("dim_customers")[["customer_id", "customer_state"]]
+    joined = orders.merge(customers, on="customer_id", how="left")
+    joined = joined[joined["customer_state"].notna()]
+    grouped = (
+        joined.groupby("customer_state", as_index=False)
+              .agg(orders=("order_id", "nunique"), revenue=("payment_total", "sum"))
+              .sort_values("orders", ascending=False)
     )
+    return grouped
 
 
 # ---------- render ----------
